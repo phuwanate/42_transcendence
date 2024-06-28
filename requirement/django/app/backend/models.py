@@ -54,3 +54,16 @@ class Notification(models.Model):
     def __str__(self):
         return f"{self.sender.username} -> {self.accepter.username}"
 ############################## Notification ##############################
+
+############################## Block List ##############################
+class BlockedList(models.Model):
+    blocker = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=True, related_name='blockers')
+    blocked = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=True, related_name='blocked')
+    date = models.DateTimeField(auto_now_add=True, null=True)
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+
+    def __str__(self):
+        return f"{self.blocker.username} -> {self.blocked.username}"
+
+############################## Block List ##############################

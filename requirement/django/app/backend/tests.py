@@ -6,7 +6,7 @@ from .models import Notification
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import authenticate, login, logout, get_user_model
 
-CLIENT_NUMB = 10
+CLIENT_NUMB = 5
 
 # Create your tests here.
 class LoginTest(TestCase):
@@ -289,7 +289,14 @@ class SendFriendRequest(TestCase):
         
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['message'], 'Send friend request success')
+    
+    def test_repeatly_send_friend_request(self):
+        for i in range(2):
+           response = self.client[CLIENT_NUMB - 1].post(f'{self.url}{self.user[1].id}/notifications/friend_request')
 
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'User already send friend request')
+        
 class GetNotificationTest(TestCase):
     def setUp(self):
         self.url ='/api/users/'
@@ -320,6 +327,12 @@ class GetNotificationTest(TestCase):
         # print(response.json())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected_load)
+    
+    def test_notification_not_found(self):
+        response = self.client[0].get(f'{self.url}notifications')
+        
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'Notifications not found')
 
 class AcceptFriend(TestCase):
     def setUp(self):
@@ -361,7 +374,14 @@ class AcceptFriend(TestCase):
         friend = update_user.friend.all()
         for i in range(CLIENT_NUMB - 1):
             self.assertEqual(self.user[i].id, friend[i].id)
-
+    
+    def test_repeatly_accept_friend(self):
+        for i in range(2):
+            response=self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[0].id}/friends/accept')
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'User was already be friends')
+        
 class GetAllFriend(TestCase):
     def setUp(self):
         self.url ='/api/users/'
@@ -397,6 +417,15 @@ class GetAllFriend(TestCase):
         # print(response.json())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected_load)
+    
+    def test_get_friend_not_found(self):
+        """
+            If User doesn't have any friend before, should return 401
+        """
+        response = self.client[CLIENT_NUMB - 1].get(f'{self.url}friends')
+        
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['error'], 'Friends not found') 
         
 class FindNewFriend(TestCase):
     def setUp(self):
@@ -460,3 +489,172 @@ class DeleteNotification(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['message'], 'Delete Notificantion Success')
         self.assertNotEqual(before.json(), after.json())
+
+class BlockUser(TestCase):
+    def setUp(self):
+        self.url ='/api/users/'
+        self.User = get_user_model()
+        self.client = [Client() for i in range(CLIENT_NUMB)]
+        self.user = [self.User.objects.create_user(username=f"user{i+1}", password=f"password{i+1}") for i in range(CLIENT_NUMB)]
+        self.payload = [{"username": f"user{i+1}", "password": f"password{i+1}"} for i in range(CLIENT_NUMB)]
+        for i in range(CLIENT_NUMB):
+            self.client[i].post(
+            "/api/auth/login", 
+            json.dumps(self.payload[i]),
+            content_type='application/json')
+            
+    def test_block_user_success(self):
+        for i in range(CLIENT_NUMB - 1):
+            response = self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/block')
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['message'], 'Block user success')
+        
+        #Get blocker Profile by blocked user should return 401
+        for i in range(CLIENT_NUMB - 1):
+            response = self.client[i].get((f'{self.url}{self.user[CLIENT_NUMB - 1].id}/profile'))
+            
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.json()['error'], 'User was blocked')
+
+        #Get blocked Profile by blocker should return 200
+        for i in range(CLIENT_NUMB - 1):
+            response = self.client[CLIENT_NUMB - 1].get((f'{self.url}{self.user[i].id}/profile'))
+            
+            self.assertEqual(response.status_code, 200)
+    
+    def test_block_some_friend_success(self): 
+        #Get all friends should see everyone but friends who's blocker
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/friends/accept')
+            if i % 2 == 0:
+                self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}friends'))
+        expected_load = [
+                {
+                    'id': self.user[i].id,
+                    'username': self.user[i].username,
+                    'avatar': self.user[i].avatar.url,
+                    'is_online': True
+                }
+                for i in range(CLIENT_NUMB - 1) if i %2 != 0
+            ]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+
+    def test_block_all_friend_success(self): 
+        #Get all blocker profile who's friends by blocked user should return 401
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/friends/accept')
+
+            self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}friends'))
+        # print(response.json())
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['error'], 'Friends not found')
+        
+    def test_block_some_user_and_find_new_friend(self):
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            if i % 2 == 0:
+                self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}friends/find_new'))
+        expected_load = [
+                {
+                    'id': self.user[i].id,
+                    'username': self.user[i].username,
+                    'avatar': self.user[i].avatar.url,
+                    'is_online': True
+                }
+                for i in range(CLIENT_NUMB - 1) if i %2 != 0
+            ]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+    
+    def test_block_all_user_and_find_new_friend(self):
+        """
+            If User was blocked by all users, User should can not find any user to send a request.
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}friends/find_new'))
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['error'], 'User was blocked by all users')
+    
+    def test_block_bysome_user_get_notification(self):
+        """
+            If User was blocked by some users, User should can not see blocker friend request
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            if i % 2 == 0:
+                self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}notifications'))
+        expected_load = [
+                {
+                    'noti_id': i + 1,
+                    'user_id': self.user[i].id,
+                    'username': self.user[i].username,
+                    'avatar': self.user[i].avatar.url,
+                    'is_online': True
+                }
+                for i in range(CLIENT_NUMB - 1) if i % 2 != 0
+            ]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+    
+    def test_block_byall_user_get_notification(self):
+        """
+        If User was blocked by all users, User should cannot see any of request's send by blocker
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get((f'{self.url}notifications'))
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'Notifications not found')
+    
+    def test_block_user_accpet_friend(self):
+        """
+            If User was blocked, sender can send a request to accepter but accepter
+            shouldn't can accpet the request.
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+            response = self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/friends/accept')
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.json()['error'], 'User was blocked')
+    
+    def test_block_user_send_request(self):
+        """
+            If User was blocked and try to send a friend request to blocker 
+            should return 401
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
+            self.client[i].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        
+            response = self.client[CLIENT_NUMB - 1].post(f'{self.url}{self.user[i].id}/notifications/friend_request')
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.json()['error'], 'User was blocked')
+        
+    def test_repeatly_block(self):
+        """
+            If User try to repeatly block the same user, should return 400
+        """
+        for i in range(2):
+            response = self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users was already blocked')
+        

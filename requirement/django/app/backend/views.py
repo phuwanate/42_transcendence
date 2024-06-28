@@ -2,7 +2,7 @@ import os
 import json
 from django.urls import reverse
 from django.conf import settings
-from .models import Notification
+from .models import Notification, BlockedList
 from django.shortcuts import render, redirect
 from django.middleware.csrf import get_token
 from django.contrib.sessions.models import Session
@@ -15,7 +15,6 @@ def get_csrf_token_and_session_id(request):
     csrf_token = get_token(request)
     session_id = request.session.session_key
     return JsonResponse({'csrf_token': csrf_token, 'sessionid': session_id}, status=200)
-
 
 def index(request):
     return render(request, 'backend/login.html')
@@ -86,7 +85,14 @@ def UserLogout(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 #2.1.1 /api/users/:user_id/profile
-def getUserProfile(User, user):        
+def getUserProfile(User, user, request):
+    blocker = User.objects.get(id=user.id)
+    try:
+        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=blocker)
+        if blockedlist:
+            return
+    except BlockedList.DoesNotExist:
+        pass  
     return( {
         'id': user.id,
         'username': user.username,
@@ -99,17 +105,20 @@ def UserProfile(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
+                blocker =  User.objects.get(id=user_id)
                 user = User.objects.get(id = user_id)
                 avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
                 if avatar_url and os.path.exists(avatar_url):
-                    payload = getUserProfile(User=User, user=user)
+                    payload = getUserProfile(User=User, user=user, request=request)
+                    if payload is None:
+                        return JsonResponse({'error': 'User was blocked'}, status=401)
                 else:
                     return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
                 return JsonResponse(payload, status=200, safe=False)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
-            return JsonResponse({'error': 'User not found'}, status=404)
+            return JsonResponse({'error': 'User not found'}, status=404)       
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -134,12 +143,33 @@ def UpdateUserAvatar(request):
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
-            return JsonResponse({'error': 'User not found'}, status=404) 
-            
+            return JsonResponse({'error': 'User not found'}, status=404)
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
-    
-#2.2.1 GET /api/users/:user_id/friends
+
+#2.1.4 PUT /api/users/:user_id/block
+def BlockUser(request, user_id):
+    if request.method == 'PUT':
+        try:
+            if request.user.is_authenticated:
+                User = get_user_model()
+                blocker = User.objects.get(id=request.user.id)
+                blocked = User.objects.get(id=user_id)
+                try:
+                    BlockedList.objects.get(blocker=blocker, blocked=blocked)
+                    return JsonResponse({'error': 'Users was already blocked'}, status=400)
+                except BlockedList.DoesNotExist:
+                    blockedlist = BlockedList(blocker=blocker, blocked=blocked)
+                    blockedlist.save()
+                    return JsonResponse({'message': 'Block user success'}, status=200)
+            else:
+                return JsonResponse({'message': 'User is not logged in'}, status=401)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)  
+    else:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+#2.2.1 GET /api/users/friends
 def GetAllFriends(request):
     if request.method == 'GET':
         try:
@@ -147,7 +177,13 @@ def GetAllFriends(request):
                 User = get_user_model()
                 user = User.objects.get(id=request.user.id)
                 friend_set = user.friend.all()
-                friends = [getUserProfile(User, friend) for friend in friend_set]
+                friends = []
+                for friend in friend_set:
+                    profile = getUserProfile(User=User, user=friend, request=request)
+                    if profile is not None:
+                        friends.append(profile)
+                if len(friends) == 0:
+                    return JsonResponse({'error': 'Friends not found'}, status=401)
                 return JsonResponse(friends, status=200 , safe=False)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
@@ -156,7 +192,7 @@ def GetAllFriends(request):
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-#2.2.1 GET: /api/users/friends/find_new
+#2.2.2 GET: /api/users/friends/find_new
 def FindNewFriends(request):
     if request.method == 'GET':
         try:
@@ -164,8 +200,13 @@ def FindNewFriends(request):
                 User = get_user_model()
                 user = User.objects.get(id=request.user.id)
                 not_friend_set =  User.objects.exclude(id=request.user.id).exclude(friend=user)
-                not_friends = [getUserProfile(User, not_friend) for not_friend in not_friend_set]
-                
+                not_friends = []
+                for not_friend in not_friend_set:
+                    profile = getUserProfile(User=User, user=not_friend, request=request)
+                    if profile is not None:
+                        not_friends.append(profile)
+                if len(not_friends) == 0:
+                    return JsonResponse({'error': 'User was blocked by all users'}, status=401)
                 return JsonResponse(not_friends, status=200 , safe=False)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
@@ -175,8 +216,16 @@ def FindNewFriends(request):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
 #2.3.1 GET /api/users/notifications
-def getUserNotification(User, noti):
-    user = User.objects.get(id = noti.sender.id)
+def getUserNotification(User, noti, request):
+    try:
+        user = User.objects.get(id=noti.sender.id)
+        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=user)
+        if blockedlist:
+            return None
+    except BlockedList.DoesNotExist:
+        pass 
+    except User.DoesNotExist:
+        return ({'error': 'User not found'})
     return( {
         'noti_id': noti.id,
         'user_id': user.id,
@@ -191,13 +240,21 @@ def GetNotifications(request):
             if request.user.is_authenticated:
                 User = get_user_model()
                 user = User.objects.get(id=request.user.id)
-                notifications = Notification.objects.filter(accepter=user)
-                requester = [getUserNotification(User, noti) for noti in notifications]
-                return JsonResponse(requester, status=200 , safe=False)
+                requester_set = Notification.objects.filter(accepter=user)
+                requesters = []
+                for requester in requester_set:
+                    profile = getUserNotification(User=User, noti=requester, request=request)
+                    if profile is not None:
+                        requesters.append(profile)
+                if len(requesters) == 0:
+                    return JsonResponse({'error': 'Notifications not found'}, status=404)
+                return JsonResponse(requesters, status=200 , safe=False)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
             return JsonResponse({'error': 'User not found'}, status=404)
+        except Notification.DoesNotExist:
+            return JsonResponse({'error': 'Notifications not found'}, status=404)
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
@@ -207,13 +264,24 @@ def AcceptFriend(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
-                accpeter = User.objects.get(id=request.user.id)
+                accepter = User.objects.get(id=request.user.id)
                 sender = User.objects.get(id=user_id)
-                notification = Notification.objects.get(sender=sender, accepter=accpeter)
-                notification.delete()
-                accpeter.friend.add(user_id)
-                accpeter.save()
-                return JsonResponse({'message': 'Accept friend success'}, status=201)
+                try:
+                    blockedlist = BlockedList.objects.get(blocked=accepter, blocker=sender)
+                    if blockedlist:
+                        return JsonResponse({'error': 'User was blocked'}, status=401)
+                except BlockedList.DoesNotExist:
+                    pass          
+                if sender in accepter.friend.all():
+                    return JsonResponse({'error': 'User was already be friends'}, status=400)      
+                try:
+                    notification = Notification.objects.get(sender=sender, accepter=accepter)
+                    notification.delete()
+                    accepter.friend.add(user_id)
+                    accepter.save()
+                    return JsonResponse({'message': 'Accept friend success'}, status=201)
+                except Notification.DoesNotExist:
+                    return JsonResponse({'error': 'Notification was not found'}, status=404)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
@@ -229,8 +297,18 @@ def SendFriendRequest(request, user_id):
                 User = get_user_model()
                 accepter = User.objects.get(id = user_id)
                 sender = User.objects.get(id = request.user.id)
-                notification = Notification(sender=sender, accepter=accepter)
-                notification.save()
+                try:
+                    blockedlist = BlockedList.objects.get(blocked=sender, blocker=accepter)
+                    if blockedlist:
+                        return JsonResponse({'error': 'User was blocked'}, status=401)
+                except BlockedList.DoesNotExist:
+                    pass
+                try:
+                    Notification.objects.get(sender=sender, accepter=accepter)
+                    return JsonResponse({'error': 'User already send friend request'}, status=400)
+                except Notification.DoesNotExist:
+                    notification = Notification(sender=sender, accepter=accepter)
+                    notification.save()
                 return JsonResponse({'message': 'Send friend request success'}, status=200)
             else:
                 return JsonResponse({'message': 'User is not logged in'}, status=401)
@@ -254,5 +332,7 @@ def DeleteNotification(request, user_id):
                 return JsonResponse({'message': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
             return JsonResponse({'error': 'User not found'}, status=404)
+        except Notification.DoesNotExist:
+            return JsonResponse({'error': 'Notification was not found'}, status=404)
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)

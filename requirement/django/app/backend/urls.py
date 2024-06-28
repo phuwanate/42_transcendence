@@ -15,5 +15,6 @@ urlpatterns = [
     path("users/friends", views.GetAllFriends, name="getAllFriend"),
     path("users/friends/find_new", views.FindNewFriends, name="findNewFriends"),
     path("users/<int:user_id>/notifications/delete", views.DeleteNotification, name="deleteNotification"),
+    path("users/<int:user_id>/block", views.BlockUser, name="blockUser"),
     path("get_csrf_token_and_session_id/", views.get_csrf_token_and_session_id, name="csrft_session"),
 ]
