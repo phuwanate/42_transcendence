@@ -6,7 +6,9 @@ from .models import Notification
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import authenticate, login, logout, get_user_model
 
-CLIENT_NUMB = 5
+#CLENT_NUMB need to be more than or equal to 3 persons.
+CLIENT_NUMB = 3
+print(f">>>>>>>>>>>>>>>>>Start tester with [{CLIENT_NUMB}] Clients<<<<<<<<<<<<<<<<<<<<")
 
 # Create your tests here.
 class LoginTest(TestCase):
@@ -316,6 +318,9 @@ class SendFriendRequest(TestCase):
         self.assertEqual(response.json()['message'], 'Send friend request success')
     
     def test_repeatly_send_friend_request(self):
+        """
+            If User try to repeatly send friend request to the same user, should return 400
+        """ 
         for i in range(2):
            response = self.client[CLIENT_NUMB - 1].post(f'{self.url}{self.user[1].id}/notifications/friend_request')
 
@@ -323,6 +328,9 @@ class SendFriendRequest(TestCase):
         self.assertEqual(response.json()['error'], 'User already send friend request')
     
     def test_user_send_request_to_themselves(self):
+        """
+            If User try to send friend request to themselves, should return 400
+        """
         response = self.client[0].post(f'{self.url}{self.user[0].id}/notifications/friend_request')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Users try to send request to themselves')
@@ -359,6 +367,9 @@ class GetNotificationTest(TestCase):
         self.assertEqual(response.json(), expected_load)
     
     def test_notification_not_found(self):
+        """
+            If User doesn't have any of notifications yet, should return 404
+        """
         response = self.client[0].get(f'{self.url}notifications')
         
         self.assertEqual(response.status_code, 404)
@@ -545,14 +556,14 @@ class BlockUser(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['message'], 'Block user success')
         
-        #Get blocker Profile by blocked user should return 401
+        #Get blocker's profile by blocked should return 401
         for i in range(CLIENT_NUMB - 1):
             response = self.client[i].get((f'{self.url}{self.user[CLIENT_NUMB - 1].id}/profile'))
             
             self.assertEqual(response.status_code, 401)
             self.assertEqual(response.json()['error'], 'User was blocked')
 
-        #Get blocked Profile by blocker should return 200
+        #Get blocked's profile by blocker should return 200
         for i in range(CLIENT_NUMB - 1):
             response = self.client[CLIENT_NUMB - 1].get((f'{self.url}{self.user[i].id}/profile'))
             
@@ -574,7 +585,7 @@ class BlockUser(TestCase):
                     'avatar': self.user[i].avatar.url,
                     'is_online': True
                 }
-                for i in range(CLIENT_NUMB - 1) if i %2 != 0
+                for i in range(CLIENT_NUMB - 1) if i % 2 != 0
             ]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected_load)
@@ -606,7 +617,7 @@ class BlockUser(TestCase):
                     'avatar': self.user[i].avatar.url,
                     'is_online': True
                 }
-                for i in range(CLIENT_NUMB - 1) if i %2 != 0
+                for i in range(CLIENT_NUMB - 1) if i % 2 != 0
             ]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected_load)
@@ -625,7 +636,7 @@ class BlockUser(TestCase):
     
     def test_block_bysome_user_get_notification(self):
         """
-            If User was blocked by some users, User should can not see blocker friend request
+            If User was blocked by some users, User should can not see blocker's friend request
         """
         for i in range(CLIENT_NUMB - 1):
             self.client[i].post(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/notifications/friend_request')
