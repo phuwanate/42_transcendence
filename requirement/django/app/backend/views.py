@@ -56,7 +56,6 @@ def UserRegister(request):
         
         if not username or not password:
             return JsonResponse({'error': 'Both username and password are required'}, status=400)
-       
         User = get_user_model()
         if User.objects.filter(username=username).exists():
             return JsonResponse({'error': 'Username already exists'}, status=400)
@@ -105,13 +104,38 @@ def UserProfile(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
-                blocker =  User.objects.get(id=user_id)
+                # blocker =  User.objects.get(id=user_id)
                 user = User.objects.get(id = user_id)
                 avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
                 if avatar_url and os.path.exists(avatar_url):
                     payload = getUserProfile(User=User, user=user, request=request)
                     if payload is None:
                         return JsonResponse({'error': 'User was blocked'}, status=401)
+                else:
+                    return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
+                return JsonResponse(payload, status=200, safe=False)
+            else:
+                return JsonResponse({'error': 'User is not logged in'}, status=401)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)       
+    else:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+#2.1.4 GET: /api/users/profile
+def OwnerProfile(request):
+    if request.method == 'GET':
+        try:
+            if request.user.is_authenticated:
+                User = get_user_model()
+                user = User.objects.get(id = request.user.id)
+                avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
+                if avatar_url and os.path.exists(avatar_url):
+                    payload = {
+                        'id': user.id,
+                        'username': user.username,
+                        'avatar': user.avatar.url,
+                        'is_online': user.is_online
+                    }
                 else:
                     return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
                 return JsonResponse(payload, status=200, safe=False)
@@ -153,6 +177,8 @@ def BlockUser(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
+                if (request.user.id == user_id):
+                    return JsonResponse({'error': 'Users try to block themselves'}, status=400)
                 blocker = User.objects.get(id=request.user.id)
                 blocked = User.objects.get(id=user_id)
                 try:
@@ -264,6 +290,8 @@ def AcceptFriend(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
+                if (request.user.id == user_id):
+                    return JsonResponse({'error': 'Users try to accept friend for themselves'}, status=400) 
                 accepter = User.objects.get(id=request.user.id)
                 sender = User.objects.get(id=user_id)
                 try:
@@ -295,6 +323,8 @@ def SendFriendRequest(request, user_id):
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
+                if (request.user.id == user_id):
+                    return JsonResponse({'error': 'Users try to send request to themselves'}, status=400) 
                 accepter = User.objects.get(id = user_id)
                 sender = User.objects.get(id = request.user.id)
                 try:

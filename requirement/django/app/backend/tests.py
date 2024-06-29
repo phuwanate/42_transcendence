@@ -212,6 +212,31 @@ class UserProfileTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), payload)
 
+class OwnerProfile(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.url ='/api/users/'
+        User = get_user_model()
+        self.user = User.objects.create_user(username="user1234", password="password1234")
+        self.payload = {
+            "username": "user1234", 
+            "password": "password1234"
+        }
+        response = self.client.post(
+            "/api/auth/login", 
+            json.dumps(self.payload),
+            content_type='application/json')
+    def test_get_owner_profile(self):
+        payload = {
+	        "id": 1,
+	        "username": "user1234",
+	        "avatar": f"{settings.MEDIA_URL}avatars/default.png",
+	        "is_online": True 
+        }
+        response = self.client.get(f'{self.url}profile')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), payload)
+
 class UpdateUserAvatarTest(TestCase):
     def setUp(self):
         self.client = Client()
@@ -296,6 +321,11 @@ class SendFriendRequest(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'User already send friend request')
+    
+    def test_user_send_request_to_themselves(self):
+        response = self.client[0].post(f'{self.url}{self.user[0].id}/notifications/friend_request')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users try to send request to themselves')
         
 class GetNotificationTest(TestCase):
     def setUp(self):
@@ -381,6 +411,11 @@ class AcceptFriend(TestCase):
         
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'User was already be friends')
+    
+    def test_user_accept_friend_for_themselves(self):
+        response=self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/friends/accept')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users try to accept friend for themselves')
         
 class GetAllFriend(TestCase):
     def setUp(self):
@@ -657,4 +692,11 @@ class BlockUser(TestCase):
             response = self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Users was already blocked')
-        
+    
+    def test_users_block_themselves(self):
+        """
+            If Users try to block themselve, should return 400
+        """
+        response = self.client[0].put(f'{self.url}{self.user[0].id}/block')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users try to block themselves')

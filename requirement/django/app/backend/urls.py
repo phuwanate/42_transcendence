@@ -8,6 +8,7 @@ urlpatterns = [
     path("auth/register", views.UserRegister, name="userRegister"),
     path("auth/logout", views.UserLogout, name="userLogout"),
     path("users/<int:user_id>/profile", views.UserProfile, name="userProfile"),
+    path("users/profile", views.OwnerProfile, name="ownerProfile"),
     path("users/update_avatar", views.UpdateUserAvatar, name="updateUserAvatar"),
     path("users/<int:user_id>/notifications/friend_request", views.SendFriendRequest, name="sendFriendRequest"),
     path("users/notifications", views.GetNotifications, name="getNotifications"),
