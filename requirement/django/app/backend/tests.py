@@ -780,3 +780,81 @@ class GetBlockedList(TestCase):
         response = self.client[CLIENT_NUMB - 1].get(f'{self.url}blocked_list')
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()['error'], 'BlockedList not found')
+
+class UnBlockUser(TestCase):
+    def setUp(self):
+        self.url ='/api/users/'
+        self.User = get_user_model()
+        self.client = [Client() for i in range(CLIENT_NUMB)]
+        self.user = [self.User.objects.create_user(username=f"user{i+1}", password=f"password{i+1}") for i in range(CLIENT_NUMB)]
+        self.payload = [{"username": f"user{i+1}", "password": f"password{i+1}"} for i in range(CLIENT_NUMB)]
+        for i in range(CLIENT_NUMB):
+            self.client[i].post(
+            "/api/auth/login", 
+            json.dumps(self.payload[i]),
+            content_type='application/json')
+    
+    def test_unblock_user_success(self):
+        """
+            If user unblock success shoud return 200 and delete the blocked record.
+        """
+        for i in range(CLIENT_NUMB - 1):
+            self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/block')
+        #Before Unblock Uer should fail to get blocker UserProfile.
+        response = response = self.client[0].get(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/profile')
+        self.assertEqual(response.json()['error'], 'User was blocked')
+        
+        response = self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[0].id}/unblock')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['message'], 'Unblock success')
+        
+        #After Unblock Users should successfulry get unblocked user.
+        expected_load = {
+            'id': self.user[CLIENT_NUMB - 1].id,
+            'username': self.user[CLIENT_NUMB - 1].username,
+            'avatar': self.user[CLIENT_NUMB - 1].avatar.url,
+            'is_online': True 
+        } 
+        response = self.client[0].get(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/profile')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+
+        #After unblock bloced_list should decrement.
+        response = self.client[CLIENT_NUMB - 1].get(f'{self.url}blocked_list')
+        expected_load = [
+                {
+                    'id': self.user[i].id,
+                    'username': self.user[i].username,
+                    'avatar': self.user[i].avatar.url,
+                    'is_online': True
+                }
+                for i in range(CLIENT_NUMB - 1) if i != 0
+            ]
+        # print(response.json())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+    
+    def test_unblock_themselves(self):  
+        """
+        If Users try to unblock themselves should return 400
+        """     
+        response = self.client[0].put(f'{self.url}{self.user[0].id}/unblock')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users try to unblock themselves')
+    
+    def test_blockedUser_unblock_blockerUser(self):
+        """
+        If Blocked users try to unblock Blocker user should return 400
+        """
+        self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[0].id}/block')
+        response = self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/unblock')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Blocked users cannot unblock blocker')
+    
+    def test_unblock_to_unblockedUser(self):
+        """
+        If User try to unblock who's not blocked should return 404
+        """
+        response = self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/unblock')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'BlockedList not found')

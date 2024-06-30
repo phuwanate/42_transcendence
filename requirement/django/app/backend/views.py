@@ -216,6 +216,34 @@ def BlockUser(request, user_id):
             return JsonResponse({'error': 'User not found'}, status=404)  
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+#2.1.7 PUT /api/users/:user_id/unblock
+def UnblockUser(request, user_id):
+    if request.method == 'PUT':
+        try:
+            if request.user.is_authenticated:
+                if (request.user.id == user_id):
+                   return JsonResponse({'error': 'Users try to unblock themselves'}, status=400) 
+                User = get_user_model()
+                blocker = User.objects.get(id=request.user.id)
+                blocked = User.objects.get(id=user_id)
+                try:
+                    BlockedList.objects.get(blocker=blocked, blocked=blocker)
+                    return JsonResponse({'error': 'Blocked users cannot unblock blocker'}, status=400)
+                except BlockedList.DoesNotExist:
+                    pass
+                try:
+                    blocked_list = BlockedList.objects.get(blocker=blocker, blocked=blocked)
+                    blocked_list.delete()
+                    return JsonResponse({'message': 'Unblock success'}, status=200)
+                except BlockedList.DoesNotExist:
+                    return JsonResponse({'error': 'BlockedList not found'}, status=404)
+            else:
+                return JsonResponse({'message': 'User is not logged in'}, status=401)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)
+    else:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 #2.1.6 GET: /api/users/blocked_list
 def GetUserBlockedList(request):
