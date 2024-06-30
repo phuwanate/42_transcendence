@@ -78,6 +78,30 @@ class LoginTest(TestCase):
         response = self.client.get(self.login_url,)
         self.assertEqual(response.status_code, 405)
         self.assertEqual(response.json()['error'], 'Method not allowed')
+    
+    def test_login_user_avatar_notfound(self):
+        """
+            If User avatar is missing should return 404
+        """
+        User = get_user_model()
+        user = User.objects.create_user(username="user1234", password="password1234")
+        
+        user.avatar = "/avatars/fake.png"
+        user.save()
+        
+        payload = {
+            "username": "user1234",
+            "password": "password1234"
+        }
+        
+        response = self.client.post(
+            self.login_url, 
+            json.dumps(payload),
+            content_type='application/json')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'Not Found the avatar file')
+        
 
 class RegiterTest(TestCase):
     def setUp(self):
@@ -426,7 +450,7 @@ class AcceptFriend(TestCase):
     def test_user_accept_friend_for_themselves(self):
         response=self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/friends/accept')
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['error'], 'Users try to accept friend for themselves')
+        self.assertEqual(response.json()['error'], 'Users try to accept friend to themselves')
         
 class GetAllFriend(TestCase):
     def setUp(self):
@@ -470,7 +494,7 @@ class GetAllFriend(TestCase):
         """
         response = self.client[CLIENT_NUMB - 1].get(f'{self.url}friends')
         
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()['error'], 'Friends not found') 
         
 class FindNewFriend(TestCase):
@@ -600,7 +624,7 @@ class BlockUser(TestCase):
         
         response = self.client[CLIENT_NUMB - 1].get((f'{self.url}friends'))
         # print(response.json())
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()['error'], 'Friends not found')
         
     def test_block_some_user_and_find_new_friend(self):
@@ -702,7 +726,7 @@ class BlockUser(TestCase):
         for i in range(2):
             response = self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['error'], 'Users was already blocked')
+        self.assertEqual(response.json()['error'], 'Users is blocker now')
     
     def test_users_block_themselves(self):
         """
@@ -711,3 +735,48 @@ class BlockUser(TestCase):
         response = self.client[0].put(f'{self.url}{self.user[0].id}/block')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Users try to block themselves')
+    
+    def test_blocked_try_to_block_blocker(self):
+        """
+            If Users is blocked and try to block the blocker, should reuturn 400
+        """
+        self.client[0].put(f'{self.url}{self.user[CLIENT_NUMB - 1].id}/block')
+        response = self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[0].id}/block')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Users is blocked now')
+    
+class GetBlockedList(TestCase):
+    def setUp(self):
+        self.url ='/api/users/'
+        self.User = get_user_model()
+        self.client = [Client() for i in range(CLIENT_NUMB)]
+        self.user = [self.User.objects.create_user(username=f"user{i+1}", password=f"password{i+1}") for i in range(CLIENT_NUMB)]
+        self.payload = [{"username": f"user{i+1}", "password": f"password{i+1}"} for i in range(CLIENT_NUMB)]
+        for i in range(CLIENT_NUMB):
+            self.client[i].post(
+            "/api/auth/login", 
+            json.dumps(self.payload[i]),
+            content_type='application/json')
+        
+    def test_get_blocked_list_success(self):
+        for i in range(CLIENT_NUMB - 1):
+            self.client[CLIENT_NUMB - 1].put(f'{self.url}{self.user[i].id}/block')
+        
+        response = self.client[CLIENT_NUMB - 1].get(f'{self.url}blocked_list')
+        expected_load = [
+                {
+                    'id': self.user[i].id,
+                    'username': self.user[i].username,
+                    'avatar': self.user[i].avatar.url,
+                    'is_online': True
+                }
+                for i in range(CLIENT_NUMB - 1)
+            ]
+        # print(response.json())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected_load)
+    
+    def test_get_blocked_list_not_found(self):
+        response = self.client[CLIENT_NUMB - 1].get(f'{self.url}blocked_list')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()['error'], 'BlockedList not found')

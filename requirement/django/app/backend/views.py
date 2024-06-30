@@ -22,6 +22,39 @@ def index(request):
 def user_register(request):
     return render(request, 'backend/register.html')
 
+def getUserProfile(User, user, request):
+    blocker = User.objects.get(id=user.id)
+    try:
+        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=blocker)
+        if blockedlist:
+            return
+    except BlockedList.DoesNotExist:
+        pass  
+    return( {
+        'id': user.id,
+        'username': user.username,
+        'avatar': user.avatar.url,
+        'is_online': user.is_online
+    })
+
+def getUserNotification(User, noti, request):
+    try:
+        user = User.objects.get(id=noti.sender.id)
+        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=user)
+        if blockedlist:
+            return None
+    except BlockedList.DoesNotExist:
+        pass 
+    except User.DoesNotExist:
+        return ({'error': 'User not found'})
+    return( {
+        'noti_id': noti.id,
+        'user_id': user.id,
+        'username': user.username,
+        'avatar': user.avatar.url,
+        'is_online': user.is_online
+    })
+
 #1.1 /api/auth/login
 def UserLogin(request):
     if request.method == 'POST':
@@ -37,7 +70,7 @@ def UserLogin(request):
             if avatar_url and os.path.exists(avatar_url):
                 pass
             else:
-                user.avatar = DEFAULT_AVATAR
+                return JsonResponse({'error': 'Not Found the avatar file'}, status=404)
             login(request, user)
             user.is_online = True
             user.save()
@@ -84,58 +117,17 @@ def UserLogout(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 #2.1.1 /api/users/:user_id/profile
-def getUserProfile(User, user, request):
-    blocker = User.objects.get(id=user.id)
-    try:
-        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=blocker)
-        if blockedlist:
-            return
-    except BlockedList.DoesNotExist:
-        pass  
-    return( {
-        'id': user.id,
-        'username': user.username,
-        'avatar': user.avatar.url,
-        'is_online': user.is_online
-    })
-
 def UserProfile(request, user_id):
     if request.method == 'GET':
         try:
             if request.user.is_authenticated:
                 User = get_user_model()
-                # blocker =  User.objects.get(id=user_id)
                 user = User.objects.get(id = user_id)
                 avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
                 if avatar_url and os.path.exists(avatar_url):
                     payload = getUserProfile(User=User, user=user, request=request)
                     if payload is None:
                         return JsonResponse({'error': 'User was blocked'}, status=401)
-                else:
-                    return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
-                return JsonResponse(payload, status=200, safe=False)
-            else:
-                return JsonResponse({'error': 'User is not logged in'}, status=401)
-        except User.DoesNotExist:
-            return JsonResponse({'error': 'User not found'}, status=404)       
-    else:
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-
-#2.1.4 GET: /api/users/profile
-def OwnerProfile(request):
-    if request.method == 'GET':
-        try:
-            if request.user.is_authenticated:
-                User = get_user_model()
-                user = User.objects.get(id = request.user.id)
-                avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
-                if avatar_url and os.path.exists(avatar_url):
-                    payload = {
-                        'id': user.id,
-                        'username': user.username,
-                        'avatar': user.avatar.url,
-                        'is_online': user.is_online
-                    }
                 else:
                     return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
                 return JsonResponse(payload, status=200, safe=False)
@@ -171,19 +163,49 @@ def UpdateUserAvatar(request):
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
-#2.1.4 PUT /api/users/:user_id/block
+#2.1.4 GET: /api/users/profile
+def OwnerProfile(request):
+    if request.method == 'GET':
+        try:
+            if request.user.is_authenticated:
+                User = get_user_model()
+                user = User.objects.get(id = request.user.id)
+                avatar_url = f'{settings.MEDIA_ROOT}/{user.avatar}'
+                if avatar_url and os.path.exists(avatar_url):
+                    payload = {
+                        'id': user.id,
+                        'username': user.username,
+                        'avatar': user.avatar.url,
+                        'is_online': user.is_online
+                    }
+                else:
+                    return JsonResponse({'error': 'Not Found the avatar file'}, status=404) 
+                return JsonResponse(payload, status=200, safe=False)
+            else:
+                return JsonResponse({'error': 'User is not logged in'}, status=401)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)       
+    else:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+#2.1.5 PUT /api/users/:user_id/block
 def BlockUser(request, user_id):
     if request.method == 'PUT':
         try:
             if request.user.is_authenticated:
-                User = get_user_model()
                 if (request.user.id == user_id):
                     return JsonResponse({'error': 'Users try to block themselves'}, status=400)
+                User = get_user_model()
                 blocker = User.objects.get(id=request.user.id)
                 blocked = User.objects.get(id=user_id)
                 try:
+                    BlockedList.objects.get(blocker=blocked, blocked=blocker)
+                    return JsonResponse({'error': 'Users is blocked now'}, status=400)
+                except BlockedList.DoesNotExist:
+                    pass
+                try:
                     BlockedList.objects.get(blocker=blocker, blocked=blocked)
-                    return JsonResponse({'error': 'Users was already blocked'}, status=400)
+                    return JsonResponse({'error': 'Users is blocker now'}, status=400)
                 except BlockedList.DoesNotExist:
                     blockedlist = BlockedList(blocker=blocker, blocked=blocked)
                     blockedlist.save()
@@ -192,6 +214,27 @@ def BlockUser(request, user_id):
                 return JsonResponse({'message': 'User is not logged in'}, status=401)
         except User.DoesNotExist:
             return JsonResponse({'error': 'User not found'}, status=404)  
+    else:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+#2.1.6 GET: /api/users/blocked_list
+def GetUserBlockedList(request):
+    if request.method == 'GET':
+        try:
+           if request.user.is_authenticated:
+                User = get_user_model()
+                user = User.objects.get(id=request.user.id)
+                blocked_set = BlockedList.objects.filter(blocker=user)
+                blocked_list = [getUserProfile(User=User, user=blockeds.blocked, request=request) for blockeds in blocked_set]
+                if len(blocked_list) == 0:
+                    return JsonResponse({'error': 'BlockedList not found'}, status=404)
+                return JsonResponse(blocked_list, status=200 , safe=False)
+           else:
+                return JsonResponse({'error': 'User is not logged in'}, status=401)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)
+        except BlockedList.DoesNotExist:
+            return JsonResponse({'error': 'Blockedlist not found'}, status=404)
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -209,7 +252,7 @@ def GetAllFriends(request):
                     if profile is not None:
                         friends.append(profile)
                 if len(friends) == 0:
-                    return JsonResponse({'error': 'Friends not found'}, status=401)
+                    return JsonResponse({'error': 'Friends not found'}, status=404)
                 return JsonResponse(friends, status=200 , safe=False)
             else:
                 return JsonResponse({'error': 'User is not logged in'}, status=401)
@@ -242,24 +285,6 @@ def FindNewFriends(request):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     
 #2.3.1 GET /api/users/notifications
-def getUserNotification(User, noti, request):
-    try:
-        user = User.objects.get(id=noti.sender.id)
-        blockedlist = BlockedList.objects.get(blocked=request.user, blocker=user)
-        if blockedlist:
-            return None
-    except BlockedList.DoesNotExist:
-        pass 
-    except User.DoesNotExist:
-        return ({'error': 'User not found'})
-    return( {
-        'noti_id': noti.id,
-        'user_id': user.id,
-        'username': user.username,
-        'avatar': user.avatar.url,
-        'is_online': user.is_online
-    })
- 
 def GetNotifications(request):
     if request.method == 'GET':
         try:
@@ -289,9 +314,9 @@ def AcceptFriend(request, user_id):
     if request.method == 'PUT':
         try:
             if request.user.is_authenticated:
-                User = get_user_model()
                 if (request.user.id == user_id):
-                    return JsonResponse({'error': 'Users try to accept friend for themselves'}, status=400) 
+                    return JsonResponse({'error': 'Users try to accept friend to themselves'}, status=400) 
+                User = get_user_model()
                 accepter = User.objects.get(id=request.user.id)
                 sender = User.objects.get(id=user_id)
                 try:
@@ -322,9 +347,9 @@ def SendFriendRequest(request, user_id):
     if request.method == 'POST':
         try:
             if request.user.is_authenticated:
-                User = get_user_model()
                 if (request.user.id == user_id):
                     return JsonResponse({'error': 'Users try to send request to themselves'}, status=400) 
+                User = get_user_model()
                 accepter = User.objects.get(id = user_id)
                 sender = User.objects.get(id = request.user.id)
                 try:
